@@ -1,11 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 
-const PORTALS = [
-  { id: "olx", label: "OLX", ex: "https://www.olx.pl/nieruchomosci/mieszkania/wynajem/gdansk/" },
-  { id: "otodom", label: "Otodom", ex: "https://www.otodom.pl/pl/wyniki/sprzedaz/mieszkanie/mazowieckie/warszawa/warszawa/warszawa" },
-  { id: "allegro", label: "Allegro Lokalnie", ex: "https://allegrolokalnie.pl/oferty/nieruchomosci" },
-  { id: "komornik", label: "Licytacje komornicze", ex: "https://licytacje.komornik.pl/Notice/Search" },
-];
+const OLX_EX = "https://www.olx.pl/nieruchomosci/mieszkania/wynajem/gdansk/";
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat("pl-PL").format(v) + " zł");
 
 // Ladny hash w URL: portal + sciezka wyszukiwania zamiast nazwy pliku (#olx-mieszkania-wynajem-gdansk).
@@ -46,8 +41,8 @@ async function readNdjson(res, onLine) {
 }
 
 export default function App() {
-  const [portal, setPortal] = useState("olx");
-  const [url, setUrl] = useState(PORTALS[0].ex);
+  const portal = "olx"; // ponytail: tylko OLX — wroc do selecta, gdy dojdzie drugi portal
+  const [url, setUrl] = useState(OLX_EX);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -78,13 +73,11 @@ export default function App() {
     setRatings({});
     setReq("");
     setErr("");
-    setPortal("olx");
-    setUrl(PORTALS[0].ex);
+    setUrl(OLX_EX);
     window.history.pushState(null, "", "/");
   }
 
   async function openHist(h) {
-    setPortal(h.portal);
     if (h.url) setUrl(h.url);
     setActive(h.file);
     window.history.pushState(null, "", "/" + slug(h)); // kazde zapytanie ma swoj URL
@@ -134,11 +127,6 @@ export default function App() {
     else fetch("/api/history").then((r) => r.json()).then((h) => { const s = find(h); if (s) openHist(s); }).catch(() => {});
   }, []);
 
-  function pickPortal(id) {
-    setPortal(id);
-    setUrl(PORTALS.find((p) => p.id === id).ex);
-  }
-
   async function run(e) {
     e.preventDefault();
     setLoading(true);
@@ -168,7 +156,7 @@ export default function App() {
 
   return (
     <div className="layout">
-      <aside>
+      {!active && <aside>
         <button type="button" className="hist new" onClick={newSearch} disabled={!active && items.length === 0}>
           + Nowe wyszukiwanie
         </button>
@@ -186,7 +174,7 @@ export default function App() {
             <span className="muted small">{h.count}</span>
           </button>
         ))}
-      </aside>
+      </aside>}
       <main>
       <header>
         <p className="kicker">Łowca ogłoszeń</p>
@@ -194,19 +182,19 @@ export default function App() {
           /* Home: tylko formularz nowej analizy. */
           <>
             <h1>Nowa analiza</h1>
+            <p className="muted small">
+              Wejdź na <a href="https://www.olx.pl/nieruchomosci/" target="_blank" rel="noopener">OLX</a>,
+              wybierz kategorię i miasto, a potem wklej tutaj link z paska adresu.
+            </p>
             <form className="hunt" onSubmit={run}>
-              <select value={portal} onChange={(e) => pickPortal(e.target.value)}>
-                {PORTALS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-              <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Wklej URL kategorii z portalu" />
+              <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={OLX_EX} />
               <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
             </form>
           </>
         ) : (
           /* Widok wyszukiwania: opis (zrodlo + prompt) i lista ocen. */
           <>
+            <button type="button" className="hist new" onClick={newSearch}>← Nowe wyszukiwanie</button>
             <h1>
               Nieruchomości <span className="muted">· {items.length} ofert</span>
             </h1>
@@ -242,7 +230,7 @@ export default function App() {
       </header>
 
       {err && <div className="empty error">{err}</div>}
-      {!err && view.length === 0 && <div className="empty">{loading ? "Ładowanie…" : "Wybierz portal, wklej URL kategorii i kliknij Scrapuj."}</div>}
+      {!err && view.length === 0 && <div className="empty">{loading ? "Ładowanie…" : "Wklej link z OLX i kliknij Scrapuj."}</div>}
 
       <div className="grid">
         {view.map((it, i) => (
