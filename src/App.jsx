@@ -42,12 +42,17 @@ export default function App() {
   const loadHistory = () =>
     fetch("/api/history").then((r) => r.json()).then((h) => { setHistory(h); return h; }).catch(() => []);
 
-  // Pokaz oferty + odtworz zapisane oceny.
+  // Pokaz oferty + odtworz zapisane oceny i wymagania, wedlug ktorych powstaly (najnowsze).
   function showItems(arr) {
     setItems(arr);
     const seed = {};
-    for (const it of arr) if (it.rating) seed[it.id || it.url] = it.rating;
+    let last = null;
+    for (const it of arr) if (it.rating) {
+      seed[it.id || it.url] = it.rating;
+      if (it.rating.requirements && (!last || (it.rating.at || 0) > (last.at || 0))) last = it.rating;
+    }
     setRatings(seed);
+    if (last) setReq(last.requirements);
   }
 
   async function openHist(h) {
