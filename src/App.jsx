@@ -8,6 +8,16 @@ const PORTALS = [
 ];
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat("pl-PL").format(v) + " zł");
 
+// Ladny hash w URL: portal + sciezka wyszukiwania zamiast nazwy pliku (#olx-mieszkania-wynajem-gdansk).
+function slug(h) {
+  try {
+    return [h.portal, ...new URL(h.url).pathname.split("/").filter((s) => s && s !== "pl" && s !== "nieruchomosci")]
+      .join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  } catch {
+    return h.file.replace(/\.json$/i, "");
+  }
+}
+
 // Czyta NDJSON z fetch-a i wola onLine dla kazdej sparsowanej linii.
 async function readNdjson(res, onLine) {
   const reader = res.body.getReader();
@@ -64,14 +74,14 @@ export default function App() {
     setErr("");
     setPortal("olx");
     setUrl(PORTALS[0].ex);
-    location.hash = "";
+    window.history.pushState(null, "", "/");
   }
 
   async function openHist(h) {
     setPortal(h.portal);
     if (h.url) setUrl(h.url);
     setActive(h.file);
-    location.hash = encodeURIComponent(h.file); // kazde zapytanie ma swoj URL
+    window.history.pushState(null, "", "/" + slug(h)); // kazde zapytanie ma swoj URL
     setErr("");
     try {
       const r = await fetch(`/api/load?file=${encodeURIComponent(h.file)}`);
@@ -111,8 +121,9 @@ export default function App() {
   useEffect(() => {
     fetch("/api/history").then((r) => r.json()).then((h) => {
       setHistory(h);
-      const want = decodeURIComponent(location.hash.slice(1));
-      const hit = h.find((x) => x.file === want) || h[0];
+      const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
+      // Dopasuj po slugu; stare linki z # lub nazwa pliku tez dzialaja.
+      const hit = h.find((x) => slug(x) === want || x.file === want) || h[0];
       if (hit) openHist(hit);
     }).catch(() => {});
   }, []);
@@ -155,7 +166,7 @@ export default function App() {
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
       showItems(d);
       const h = await loadHistory();
-      if (h[0]) { setActive(h[0].file); location.hash = encodeURIComponent(h[0].file); } // najnowszy wpis = wlasnie zescrapowany
+      if (h[0]) { setActive(h[0].file); window.history.pushState(null, "", "/" + slug(h[0])); } // najnowszy wpis = wlasnie zescrapowany
 
     } catch (e) {
       setErr(String(e.message || e));
