@@ -32,9 +32,6 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [q, setQ] = useState("");
-  const [max, setMax] = useState("");
-  const [sort, setSort] = useState("none");
   const [req, setReq] = useState("");
   const [ratings, setRatings] = useState({});
   const [history, setHistory] = useState([]);
@@ -57,6 +54,7 @@ export default function App() {
     setPortal(h.portal);
     if (h.url) setUrl(h.url);
     setActive(h.file);
+    location.hash = encodeURIComponent(h.file); // kazde zapytanie ma swoj URL
     setErr("");
     try {
       const r = await fetch(`/api/load?file=${encodeURIComponent(h.file)}`);
@@ -92,11 +90,13 @@ export default function App() {
     }
   }
 
-  // Na starcie: wczytaj historie i pokaz najnowsze wyszukanie.
+  // Na starcie: wczytaj historie i otworz zapytanie z URL-a (#hash), a bez niego najnowsze.
   useEffect(() => {
     fetch("/api/history").then((r) => r.json()).then((h) => {
       setHistory(h);
-      if (h[0]) openHist(h[0]);
+      const want = decodeURIComponent(location.hash.slice(1));
+      const hit = h.find((x) => x.file === want) || h[0];
+      if (hit) openHist(hit);
     }).catch(() => {});
   }, []);
 
@@ -138,7 +138,7 @@ export default function App() {
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
       showItems(d);
       const h = await loadHistory();
-      if (h[0]) setActive(h[0].file); // najnowszy wpis = wlasnie zescrapowany
+      if (h[0]) { setActive(h[0].file); location.hash = encodeURIComponent(h[0].file); } // najnowszy wpis = wlasnie zescrapowany
 
     } catch (e) {
       setErr(String(e.message || e));
@@ -148,18 +148,11 @@ export default function App() {
     }
   }
 
+  // Zawsze od najlepszej oceny; nieocenione na koncu w kolejnosci scrape'a.
   const view = useMemo(() => {
-    let a = items.filter(
-      (it) =>
-        (!q || (it.title || "").toLowerCase().includes(q.toLowerCase())) &&
-        (!max || (it.price != null && it.price <= Number(max)))
-    );
-    if (sort === "asc") a = [...a].sort((x, y) => (x.price ?? 1e18) - (y.price ?? 1e18));
-    if (sort === "desc") a = [...a].sort((x, y) => (y.price ?? -1) - (x.price ?? -1));
     const score = (it) => ratings[it.id || it.url]?.score ?? -1;
-    if (sort === "score") a = [...a].sort((x, y) => score(y) - score(x));
-    return a;
-  }, [items, q, max, sort, ratings]);
+    return [...items].sort((x, y) => score(y) - score(x));
+  }, [items, ratings]);
 
   return (
     <div className="layout">
@@ -181,32 +174,35 @@ export default function App() {
       </aside>
       <main>
       <header>
+        <p className="kicker">Łowca ogłoszeń</p>
         <h1>
-          Ogłoszenia <span className="muted">— {view.length}/{items.length}</span>
+          Nieruchomości <span className="muted">· {items.length} ofert</span>
         </h1>
-        <form className="controls" onSubmit={run}>
+        <form className="hunt" onSubmit={run}>
           <select value={portal} onChange={(e) => pickPortal(e.target.value)}>
             {PORTALS.map((p) => (
               <option key={p.id} value={p.id}>{p.label}</option>
             ))}
           </select>
-          <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL kategorii" />
-          <button type="submit" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
+          <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Wklej URL kategorii z portalu" />
+          <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
         </form>
         {items.length > 0 && (
-          <div className="controls">
-            <input type="search" placeholder="Szukaj w tytule…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <input type="number" placeholder="Cena max" value={max} onChange={(e) => setMax(e.target.value)} />
-            <button type="button" onClick={() => setSort((s) => (s === "asc" ? "desc" : s === "desc" ? "none" : "asc"))}>
-              Cena {sort === "asc" ? "↑" : sort === "desc" ? "↓" : "—"}
-            </button>
-            <button type="button" onClick={() => setSort((s) => (s === "score" ? "none" : "score"))}>
-              Ocena {sort === "score" ? "↓" : "—"}
-            </button>
-            <input className="url" value={req} onChange={(e) => setReq(e.target.value)} placeholder="Wymagania do oceny (np. do 3000 zł, blisko centrum, 2 pokoje)" />
-            <button type="button" onClick={rateAll} disabled={!req || !active || rateAllLoading}>
-              {rateAllLoading ? "Oceniam wszystkie…" : `Oceń wszystkie (${items.length})`}
-            </button>
+          <div className="brief">
+            <label htmlFor="req">Czego szukasz?</label>
+            <textarea
+              id="req"
+              rows={3}
+              value={req}
+              onChange={(e) => setReq(e.target.value)}
+              placeholder={"Opisz wymagania, np.:\ndo 3000 zł, 2 pokoje, blisko centrum, balkon, zwierzęta mile widziane"}
+            />
+            <div className="brief-foot">
+              <span className="muted small">AI oceni każdą ofertę 1–10 względem wymagań — lista sama ułoży się od najlepszych.</span>
+              <button type="button" className="primary" onClick={rateAll} disabled={!req.trim() || !active || rateAllLoading}>
+                {rateAllLoading ? "Oceniam wszystkie…" : `Oceń wszystkie (${items.length})`}
+              </button>
+            </div>
           </div>
         )}
         {progress && (
@@ -232,10 +228,15 @@ export default function App() {
               const r = ratings[it.id || it.url];
               return (
                 <>
-                  <button type="button" onClick={() => rate(it)} disabled={!req || r?.loading}>
+                  <button type="button" onClick={() => rate(it)} disabled={!req.trim() || r?.loading}>
                     {r?.loading ? "Oceniam…" : "Oceń"}
                   </button>
-                  {r?.score != null && <div className="score">Ocena: {r.score}/10 — {r.reason}</div>}
+                  {r?.score != null && (
+                    <div className="score">
+                      <span className="score-num">{r.score}<small>/10</small></span>
+                      <span>{r.reason}</span>
+                    </div>
+                  )}
                   {r?.error && <div className="score error">{r.error}</div>}
                 </>
               );
