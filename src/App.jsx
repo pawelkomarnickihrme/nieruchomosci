@@ -128,29 +128,6 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  async function rate(it) {
-    const key = it.id || it.url;
-    setRatings((r) => ({ ...r, [key]: { loading: true } }));
-    try {
-      const res = await fetch("/api/rate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ offer: it, requirements: req }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Błąd");
-      // NDJSON: {partial} w trakcie generowania (ocena "pisze sie" na zywo), ostatnia linia = final.
-      let final = null;
-      await readNdjson(res, (m) => {
-        if (m.error) throw new Error(m.error);
-        if (m.partial) setRatings((r) => ({ ...r, [key]: { ...m.partial, loading: true } }));
-        else { final = m; setRatings((r) => ({ ...r, [key]: m })); }
-      });
-      if (!final) throw new Error("Brak wyniku.");
-    } catch (e) {
-      setRatings((r) => ({ ...r, [key]: { error: String(e.message || e) } }));
-    }
-  }
-
   function pickPortal(id) {
     setPortal(id);
     setUrl(PORTALS.find((p) => p.id === id).ex);
@@ -263,6 +240,11 @@ export default function App() {
       <div className="grid">
         {view.map((it, i) => (
           <div className="card" key={it.id || it.url || i}>
+            {it.photo && (
+              <a href={it.url} target="_blank" rel="noopener" className="thumb">
+                <img src={it.photo.replace(/;s=\d+x\d+/, ";s=600x450")} alt="" loading="lazy" />
+              </a>
+            )}
             <div className="price">{money(it.price)}</div>
             <a href={it.url} target="_blank" rel="noopener">{it.title || "(bez tytułu)"}</a>
             {it.location && <div className="loc">{it.location}</div>}
@@ -270,9 +252,6 @@ export default function App() {
               const r = ratings[it.id || it.url];
               return (
                 <>
-                  <button type="button" onClick={() => rate(it)} disabled={!req.trim() || r?.loading}>
-                    {r?.loading ? "Oceniam…" : "Oceń"}
-                  </button>
                   {r?.score != null && (
                     <div className="score">
                       <span className="score-num">{r.score}<small>/10</small></span>

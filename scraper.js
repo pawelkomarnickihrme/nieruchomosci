@@ -64,12 +64,14 @@ function normalize(raw, base) {
   let url = raw.url || raw.slug;
   if (url && url.startsWith("/")) url = base.replace(/\/$/, "") + url;
   const loc = raw.location;
+  const ph = raw.photos?.[0] ?? raw.images?.[0]; // OLX: string, Otodom: obiekt
   return {
     title: raw.title || raw.name || null,
     price: flattenPrice(raw.price || raw.totalPrice || raw.priceInfo),
     url: url || null,
     location: loc && typeof loc === "object" ? loc.cityName ?? null : loc ?? null,
     id: raw.id ?? null,
+    photo: (typeof ph === "string" ? ph : ph?.medium || ph?.large || ph?.url) ?? null,
   };
 }
 
@@ -255,8 +257,12 @@ export async function scrape(portal, url) {
 
   const name = storeName(portal, url);
   const store = await getJson(name, []);
-  const have = new Set(store.map(key));
-  for (const n of fresh) if (!have.has(key(n))) { have.add(key(n)); store.push(n); }
+  const have = new Map(store.map((s) => [key(s), s]));
+  for (const n of fresh) {
+    const ex = have.get(key(n));
+    if (ex) ex.photo ??= n.photo; // stare wpisy sprzed zdjec dostaja fotke przy ponownym scrape
+    else { have.set(key(n), n); store.push(n); }
+  }
   await setJson(name, store);
   const manifest = await getJson(MANIFEST, {});
   manifest[name] = { url, portal, count: store.length, at: Date.now() };

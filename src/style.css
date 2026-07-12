@@ -127,11 +127,12 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
 .card:nth-child(4) { animation-delay: 0.12s; }
 .card:nth-child(5) { animation-delay: 0.15s; }
 .card:nth-child(6) { animation-delay: 0.18s; }
+.thumb { margin: -16px -18px 4px; border-bottom: 1.5px solid var(--ink-line); }
+.thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4.5px 4.5px 0 0; }
 .card a { color: var(--ink); text-decoration: none; font-weight: 600; }
 .card a:hover { color: var(--brick); text-decoration: underline; text-underline-offset: 3px; }
 .price { font-family: "Fraunces", serif; font-size: 24px; font-weight: 900; color: var(--brick); }
 .loc { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
-.card button { align-self: flex-start; padding: 6px 14px; font-size: 13px; }
 
 .score {
   display: flex;
