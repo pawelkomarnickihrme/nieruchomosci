@@ -55,6 +55,18 @@ export default function App() {
     if (last) setReq(last.requirements);
   }
 
+  // Czysty start: pusty formularz, zadny wpis z historii nie jest aktywny.
+  function newSearch() {
+    setActive("");
+    setItems([]);
+    setRatings({});
+    setReq("");
+    setErr("");
+    setPortal("olx");
+    setUrl(PORTALS[0].ex);
+    location.hash = "";
+  }
+
   async function openHist(h) {
     setPortal(h.portal);
     if (h.url) setUrl(h.url);
@@ -162,6 +174,9 @@ export default function App() {
   return (
     <div className="layout">
       <aside>
+        <button type="button" className="hist new" onClick={newSearch} disabled={!active && items.length === 0}>
+          + Nowe wyszukiwanie
+        </button>
         <h2>Historia</h2>
         {history.length === 0 && <div className="muted small">Brak wyszukan.</div>}
         {history.map((h) => (

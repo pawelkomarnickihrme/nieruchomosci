@@ -178,6 +178,7 @@ aside h2 { margin: 0 0 14px; font-family: "Fraunces", serif; font-weight: 700; f
 .hist:hover { background: var(--card); transform: none; box-shadow: none; }
 .hist.on { border-color: var(--ink-line); background: var(--card); box-shadow: var(--shadow); }
 .hist .ht { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.hist.new { border-color: var(--ink-line); font-weight: 600; margin-bottom: 14px; justify-content: center; }
 .tag { font-size: 10.5px; font-weight: 600; color: var(--brick); text-transform: uppercase; letter-spacing: 0.08em; }
 
 @media (max-width: 720px) {
