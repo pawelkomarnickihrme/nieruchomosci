@@ -122,8 +122,8 @@ export default function App() {
     fetch("/api/history").then((r) => r.json()).then((h) => {
       setHistory(h);
       const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
-      // Dopasuj po slugu; stare linki z # lub nazwa pliku tez dzialaja.
-      const hit = h.find((x) => slug(x) === want || x.file === want) || h[0];
+      // Dopasuj po slugu; stare linki z # lub nazwa pliku tez dzialaja. Bez sluga -> home z formularzem.
+      const hit = want && h.find((x) => slug(x) === want || x.file === want);
       if (hit) openHist(hit);
     }).catch(() => {});
   }, []);
@@ -206,35 +206,46 @@ export default function App() {
       <main>
       <header>
         <p className="kicker">Łowca ogłoszeń</p>
-        <h1>
-          Nieruchomości <span className="muted">· {items.length} ofert</span>
-        </h1>
-        <form className="hunt" onSubmit={run}>
-          <select value={portal} onChange={(e) => pickPortal(e.target.value)}>
-            {PORTALS.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
-          <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Wklej URL kategorii z portalu" />
-          <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
-        </form>
-        {items.length > 0 && (
-          <div className="brief">
-            <label htmlFor="req">Czego szukasz?</label>
-            <textarea
-              id="req"
-              rows={3}
-              value={req}
-              onChange={(e) => setReq(e.target.value)}
-              placeholder={"Opisz wymagania, np.:\ndo 3000 zł, 2 pokoje, blisko centrum, balkon, zwierzęta mile widziane"}
-            />
-            <div className="brief-foot">
-              <span className="muted small">AI oceni każdą ofertę 1–10 względem wymagań — lista sama ułoży się od najlepszych.</span>
-              <button type="button" className="primary" onClick={rateAll} disabled={!req.trim() || !active || rateAllLoading}>
-                {rateAllLoading ? "Oceniam wszystkie…" : `Oceń wszystkie (${items.length})`}
-              </button>
-            </div>
-          </div>
+        {!active ? (
+          /* Home: tylko formularz nowej analizy. */
+          <>
+            <h1>Nowa analiza</h1>
+            <form className="hunt" onSubmit={run}>
+              <select value={portal} onChange={(e) => pickPortal(e.target.value)}>
+                {PORTALS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+              <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Wklej URL kategorii z portalu" />
+              <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
+            </form>
+          </>
+        ) : (
+          /* Widok wyszukiwania: opis (zrodlo + prompt) i lista ocen. */
+          <>
+            <h1>
+              Nieruchomości <span className="muted">· {items.length} ofert</span>
+            </h1>
+            {url && <p className="muted small">{url}</p>}
+            {items.length > 0 && (
+              <div className="brief">
+                <label htmlFor="req">Czego szukasz?</label>
+                <textarea
+                  id="req"
+                  rows={3}
+                  value={req}
+                  onChange={(e) => setReq(e.target.value)}
+                  placeholder={"Opisz wymagania, np.:\ndo 3000 zł, 2 pokoje, blisko centrum, balkon, zwierzęta mile widziane"}
+                />
+                <div className="brief-foot">
+                  <span className="muted small">AI oceni każdą ofertę 1–10 względem wymagań — lista sama ułoży się od najlepszych.</span>
+                  <button type="button" className="primary" onClick={rateAll} disabled={!req.trim() || rateAllLoading}>
+                    {rateAllLoading ? "Oceniam wszystkie…" : `Oceń wszystkie (${items.length})`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
         {progress && (
           <div className="progress">
