@@ -20,6 +20,7 @@ body {
   background-image: radial-gradient(rgba(33, 29, 24, 0.05) 1px, transparent 1px);
   background-size: 22px 22px;
   color: var(--ink);
+  overflow-wrap: anywhere; /* dlugie URL-e nie rozpychaja strony */
 }
 
 /* ---- naglowek + formularz ---- */
@@ -185,4 +186,6 @@ aside h2 { margin: 0 0 14px; font-family: "Fraunces", serif; font-weight: 700; f
   .layout { flex-direction: column; }
   aside { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 2px solid var(--ink-line); }
   header, .grid { padding-left: 20px; padding-right: 20px; }
+  .grid { grid-template-columns: 1fr; }
+  .url { min-width: 0; }
 }
