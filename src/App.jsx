@@ -18,6 +18,15 @@ function slug(h) {
   }
 }
 
+// Historia per uzytkownik w localStorage — baza trzyma dane, ale liste wyszukan kazdy ma swoja.
+const LS = "nieruchomosci:hist";
+const readLocal = () => { try { return JSON.parse(localStorage.getItem(LS)) || []; } catch { return []; } };
+function saveLocal(entry) {
+  const next = [entry, ...readLocal().filter((x) => x.file !== entry.file)];
+  localStorage.setItem(LS, JSON.stringify(next));
+  return next;
+}
+
 // Czyta NDJSON z fetch-a i wola onLine dla kazdej sparsowanej linii.
 async function readNdjson(res, onLine) {
   const reader = res.body.getReader();
@@ -44,13 +53,10 @@ export default function App() {
   const [err, setErr] = useState("");
   const [req, setReq] = useState("");
   const [ratings, setRatings] = useState({});
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(readLocal);
   const [active, setActive] = useState("");
   const [rateAllLoading, setRateAllLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total }
-
-  const loadHistory = () =>
-    fetch("/api/history").then((r) => r.json()).then((h) => { setHistory(h); return h; }).catch(() => []);
 
   // Pokaz oferty + odtworz zapisane oceny i wymagania, wedlug ktorych powstaly (najnowsze).
   function showItems(arr) {
@@ -117,15 +123,15 @@ export default function App() {
     }
   }
 
-  // Na starcie: wczytaj historie i otworz zapytanie z URL-a (#hash), a bez niego najnowsze.
+  // Na starcie: otworz zapytanie z URL-a. Najpierw lokalna historia; udostepniony link
+  // (spoza niej) rozwiazujemy przez /api/history — dane sa w bazie, ale nie laduje do paska.
   useEffect(() => {
-    fetch("/api/history").then((r) => r.json()).then((h) => {
-      setHistory(h);
-      const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
-      // Dopasuj po slugu; stare linki z # lub nazwa pliku tez dzialaja. Bez sluga -> home z formularzem.
-      const hit = want && h.find((x) => slug(x) === want || x.file === want);
-      if (hit) openHist(hit);
-    }).catch(() => {});
+    const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
+    if (!want) return;
+    const find = (h) => h.find((x) => slug(x) === want || x.file === want);
+    const hit = find(readLocal());
+    if (hit) openHist(hit);
+    else fetch("/api/history").then((r) => r.json()).then((h) => { const s = find(h); if (s) openHist(s); }).catch(() => {});
   }, []);
 
   function pickPortal(id) {
@@ -142,9 +148,10 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
       showItems(d);
-      const h = await loadHistory();
-      if (h[0]) { setActive(h[0].file); window.history.pushState(null, "", "/" + slug(h[0])); } // najnowszy wpis = wlasnie zescrapowany
-
+      // Wpis do lokalnej historii: serwer zna nazwe pliku, bierzemy ja z /api/history.
+      const sh = await fetch("/api/history").then((r) => r.json());
+      const mine = sh.find((x) => x.portal === portal && x.url === url);
+      if (mine) { setHistory(saveLocal(mine)); setActive(mine.file); window.history.pushState(null, "", "/" + slug(mine)); }
     } catch (e) {
       setErr(String(e.message || e));
       setItems([]);
