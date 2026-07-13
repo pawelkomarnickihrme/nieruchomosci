@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useMemo, useEffect } from "react";
 
 const OLX_EX = "https://www.olx.pl/nieruchomosci/mieszkania/wynajem/gdansk/";
@@ -21,6 +23,10 @@ function saveLocal(entry) {
   localStorage.setItem(LS, JSON.stringify(next));
   return next;
 }
+
+// Cache ofert w pamieci (plik -> items): powrot do wyszukiwania renderuje sie od razu z cache,
+// a swieze dane dociagaja sie w tle — strona nie pustoszeje i nie skacze przy wczytywaniu.
+const cache = new Map();
 
 // Czyta NDJSON z fetch-a i wola onLine dla kazdej sparsowanej linii.
 async function readNdjson(res, onLine) {
@@ -48,7 +54,7 @@ export default function App() {
   const [err, setErr] = useState("");
   const [req, setReq] = useState("");
   const [ratings, setRatings] = useState({});
-  const [history, setHistory] = useState(readLocal);
+  const [history, setHistory] = useState([]); // localStorage dopiero w efekcie — SSR go nie ma
   const [active, setActive] = useState("");
   const [rateAllLoading, setRateAllLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total }
@@ -82,11 +88,15 @@ export default function App() {
     setActive(h.file);
     window.history.pushState(null, "", "/" + slug(h)); // kazde zapytanie ma swoj URL
     setErr("");
+    const hit = cache.get(h.file);
+    if (hit) showItems(hit); // od razu z cache, swieze dane podmienia sie po cichu
     try {
       const r = await fetch(`/api/load?file=${encodeURIComponent(h.file)}`);
-      showItems(await r.json());
+      const fresh = await r.json();
+      cache.set(h.file, fresh);
+      showItems(fresh);
     } catch (e) {
-      setErr(String(e.message || e));
+      if (!hit) setErr(String(e.message || e));
     }
   }
 
@@ -108,6 +118,7 @@ export default function App() {
         setRatings((r) => ({ ...r, [m.key]: m.rating }));
         setProgress({ done: m.done, total: m.total });
       });
+      cache.delete(active); // oceny zmienily plik na serwerze — nastepne otwarcie dociagnie swieze
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
@@ -116,13 +127,15 @@ export default function App() {
     }
   }
 
-  // Na starcie: otworz zapytanie z URL-a. Najpierw lokalna historia; udostepniony link
-  // (spoza niej) rozwiazujemy przez /api/history — dane sa w bazie, ale nie laduje do paska.
+  // Na starcie: wczytaj lokalna historie i otworz zapytanie z URL-a. Udostepniony link
+  // (spoza historii) rozwiazujemy przez /api/history — dane sa w bazie, ale nie laduje do paska.
   useEffect(() => {
+    const local = readLocal();
+    setHistory(local);
     const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
     if (!want) return;
     const find = (h) => h.find((x) => slug(x) === want || x.file === want);
-    const hit = find(readLocal());
+    const hit = find(local);
     if (hit) openHist(hit);
     else fetch("/api/history").then((r) => r.json()).then((h) => { const s = find(h); if (s) openHist(s); }).catch(() => {});
   }, []);
@@ -139,7 +152,12 @@ export default function App() {
       // Wpis do lokalnej historii: serwer zna nazwe pliku, bierzemy ja z /api/history.
       const sh = await fetch("/api/history").then((r) => r.json());
       const mine = sh.find((x) => x.portal === portal && x.url === url);
-      if (mine) { setHistory(saveLocal(mine)); setActive(mine.file); window.history.pushState(null, "", "/" + slug(mine)); }
+      if (mine) {
+        cache.set(mine.file, d);
+        setHistory(saveLocal(mine));
+        setActive(mine.file);
+        window.history.pushState(null, "", "/" + slug(mine));
+      }
     } catch (e) {
       setErr(String(e.message || e));
       setItems([]);

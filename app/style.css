@@ -15,7 +15,7 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font: 15px/1.55 "Instrument Sans", sans-serif;
+  font: 15px/1.55 var(--font-sans), sans-serif;
   background: var(--paper);
   background-image: radial-gradient(rgba(33, 29, 24, 0.05) 1px, transparent 1px);
   background-size: 22px 22px;
@@ -39,7 +39,7 @@ header {
 }
 h1 {
   margin: 0 0 18px;
-  font-family: "Fraunces", serif;
+  font-family: var(--font-fraunces), serif;
   font-weight: 900;
   font-size: 34px;
   line-height: 1.1;
@@ -82,7 +82,7 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
 .brief label {
   display: block;
   margin-bottom: 8px;
-  font-family: "Fraunces", serif;
+  font-family: var(--font-fraunces), serif;
   font-weight: 700;
   font-size: 19px;
 }
@@ -131,7 +131,7 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
 .thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4.5px 4.5px 0 0; }
 .card a { color: var(--ink); text-decoration: none; font-weight: 600; }
 .card a:hover { color: var(--brick); text-decoration: underline; text-underline-offset: 3px; }
-.price { font-family: "Fraunces", serif; font-size: 24px; font-weight: 900; color: var(--brick); }
+.price { font-family: var(--font-fraunces), serif; font-size: 24px; font-weight: 900; color: var(--brick); }
 .loc { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
 
 .score {
@@ -142,11 +142,11 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
   padding-top: 8px;
   font-size: 13.5px;
 }
-.score-num { font-family: "Fraunces", serif; font-weight: 900; font-size: 24px; color: var(--gold); flex-shrink: 0; }
+.score-num { font-family: var(--font-fraunces), serif; font-weight: 900; font-size: 24px; color: var(--gold); flex-shrink: 0; }
 .score-num small { font-size: 12px; font-weight: 500; color: var(--muted); }
 .score.error { color: var(--err); }
 
-.empty { padding: 70px 32px; text-align: center; color: var(--muted); font-family: "Fraunces", serif; font-size: 19px; }
+.empty { padding: 70px 32px; text-align: center; color: var(--muted); font-family: var(--font-fraunces), serif; font-size: 19px; }
 .empty.error { color: var(--err); }
 
 /* ---- layout + historia ---- */
@@ -162,7 +162,7 @@ aside {
   top: 0;
   padding: 28px 16px;
 }
-aside h2 { margin: 0 0 14px; font-family: "Fraunces", serif; font-weight: 700; font-size: 18px; }
+aside h2 { margin: 0 0 14px; font-family: var(--font-fraunces), serif; font-weight: 700; font-size: 18px; }
 .small { font-size: 12px; }
 .hist {
   display: flex;

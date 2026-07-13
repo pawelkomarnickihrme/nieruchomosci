@@ -155,28 +155,31 @@ async function listFiles() {
   }
 }
 
-function storeName(portal, url) {
+export function storeName(portal, url) {
   const slug = url.replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/gi, "-").replace(/-+$/,"").slice(0, 80);
   return `${portal}-${slug}.json`;
 }
 
-// Historia wyszukan: manifest (url/portal) + faktyczny licznik ze store, najnowsze pierwsze.
+// Historia wyszukan z samego manifestu (count/title zapisywane przy scrape) — bez sciagania
+// calych store'ow per wpis. Stare wpisy bez count/title dociagane i dopisywane raz.
 export async function listHistory() {
   const manifest = await getJson(MANIFEST, {});
+  // na Redisie lista plikow == klucze manifestu — nie czytaj go z sieci drugi raz przez listFiles()
+  const files = useRedis() ? Object.keys(manifest) : await listFiles();
+  let dirty = false;
   const rows = await Promise.all(
-    (await listFiles()).map(async (f) => {
-      const m = manifest[f] || {};
-      const items = await getJson(f, []);
-      return {
-        file: f,
-        portal: m.portal || f.split("-")[0],
-        url: m.url || "",
-        count: items.length,
-        title: items[0]?.title || f,
-        at: m.at || 0,
-      };
+    files.map(async (f) => {
+      const m = (manifest[f] ||= {});
+      if (m.count == null || m.title == null) {
+        const items = await getJson(f, []);
+        m.count = items.length;
+        m.title = items[0]?.title || f;
+        dirty = true;
+      }
+      return { file: f, portal: m.portal || f.split("-")[0], url: m.url || "", count: m.count, title: m.title, at: m.at || 0 };
     })
   );
+  if (dirty) await setJson(MANIFEST, manifest);
   return rows.sort((a, b) => b.at - a.at);
 }
 
@@ -265,7 +268,7 @@ export async function scrape(portal, url) {
   }
   await setJson(name, store);
   const manifest = await getJson(MANIFEST, {});
-  manifest[name] = { url, portal, count: store.length, at: Date.now() };
+  manifest[name] = { url, portal, count: store.length, title: store[0]?.title || name, at: Date.now() };
   await setJson(MANIFEST, manifest);
   return store;
 }

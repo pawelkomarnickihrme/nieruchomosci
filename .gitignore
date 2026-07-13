@@ -6,3 +6,4 @@ data/
 .agents/
 package-lock.json
 skills-lock.json
+.next/
