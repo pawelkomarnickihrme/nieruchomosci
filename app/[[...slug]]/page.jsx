@@ -1,9 +1,19 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import CATS from "../olx-categories.json"; // drzewo kategorii OLX (nazwa, segment sciezki, dzieci)
 
-const OLX_EX = "https://www.olx.pl/nieruchomosci/mieszkania/wynajem/gdansk/";
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat("pl-PL").format(v) + " zł");
+
+// "Zielona Góra" -> "zielona-gora", "Łódź" -> "lodz" (NFD nie rozklada ł).
+const citySlug = (s) =>
+  s.trim().toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+// Domyslnie: Nieruchomosci > Mieszkania > Wynajem.
+const DEF_CAT = Math.max(0, CATS.findIndex((c) => c.p === "nieruchomosci"));
+const DEF_SUB = Math.max(-1, (CATS[DEF_CAT].c || []).findIndex((c) => c.p === "mieszkania"));
+const DEF_SUB2 = Math.max(-1, (CATS[DEF_CAT].c?.[DEF_SUB]?.c || []).findIndex((c) => c.p === "wynajem"));
 
 // Ladny hash w URL: portal + sciezka wyszukiwania zamiast nazwy pliku (#olx-mieszkania-wynajem-gdansk).
 function slug(h) {
@@ -48,7 +58,18 @@ async function readNdjson(res, onLine) {
 
 export default function App() {
   const portal = "olx"; // ponytail: tylko OLX — wroc do selecta, gdy dojdzie drugi portal
-  const [url, setUrl] = useState(OLX_EX);
+  const [url, setUrl] = useState(""); // URL aktywnego wyszukiwania (z historii lub zbudowany)
+  // Budowanie linku z kategorii + miasta zamiast wklejania.
+  const [cat, setCat] = useState(DEF_CAT);
+  const [sub, setSub] = useState(DEF_SUB);   // -1 = cala kategoria
+  const [sub2, setSub2] = useState(DEF_SUB2);
+  const [city, setCity] = useState("");
+  const subs = CATS[cat].c || [];
+  const subs2 = subs[sub]?.c || [];
+  const builtUrl = useMemo(() => {
+    const parts = [CATS[cat].p, subs[sub]?.p, subs2[sub2]?.p, citySlug(city)].filter(Boolean);
+    return "https://www.olx.pl/" + parts.join("/") + "/";
+  }, [cat, sub, sub2, city]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -79,7 +100,7 @@ export default function App() {
     setRatings({});
     setReq("");
     setErr("");
-    setUrl(OLX_EX);
+    setUrl("");
     window.history.pushState(null, "", "/");
   }
 
@@ -145,13 +166,14 @@ export default function App() {
     setLoading(true);
     setErr("");
     try {
-      const r = await fetch(`/api/scrape?portal=${portal}&url=${encodeURIComponent(url)}`);
+      const r = await fetch(`/api/scrape?portal=${portal}&url=${encodeURIComponent(builtUrl)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
+      setUrl(builtUrl);
       showItems(d);
       // Wpis do lokalnej historii: serwer zna nazwe pliku, bierzemy ja z /api/history.
       const sh = await fetch("/api/history").then((r) => r.json());
-      const mine = sh.find((x) => x.portal === portal && x.url === url);
+      const mine = sh.find((x) => x.portal === portal && x.url === builtUrl);
       if (mine) {
         cache.set(mine.file, d);
         setHistory(saveLocal(mine));
@@ -200,14 +222,27 @@ export default function App() {
           /* Home: tylko formularz nowej analizy. */
           <>
             <h1>Nowa analiza</h1>
-            <p className="muted small">
-              Wejdź na <a href="https://www.olx.pl/nieruchomosci/" target="_blank" rel="noopener">OLX</a>,
-              wybierz kategorię i miasto, a potem wklej tutaj link z paska adresu.
-            </p>
+            <p className="muted small">Wybierz kategorię OLX i miasto — link zbuduje się sam.</p>
             <form className="hunt" onSubmit={run}>
-              <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={OLX_EX} />
+              <select value={cat} onChange={(e) => { setCat(+e.target.value); setSub(-1); setSub2(-1); }}>
+                {CATS.map((c, i) => <option key={c.p} value={i}>{c.n}</option>)}
+              </select>
+              {subs.length > 0 && (
+                <select value={sub} onChange={(e) => { setSub(+e.target.value); setSub2(-1); }}>
+                  <option value={-1}>Wszystkie</option>
+                  {subs.map((c, i) => <option key={c.p} value={i}>{c.n}</option>)}
+                </select>
+              )}
+              {subs2.length > 0 && (
+                <select value={sub2} onChange={(e) => setSub2(+e.target.value)}>
+                  <option value={-1}>Wszystkie</option>
+                  {subs2.map((c, i) => <option key={c.p} value={i}>{c.n}</option>)}
+                </select>
+              )}
+              <input className="url" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Miasto (puste = cała Polska)" />
               <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
             </form>
+            <p className="muted small"><a href={builtUrl} target="_blank" rel="noopener">{builtUrl}</a></p>
           </>
         ) : (
           /* Widok wyszukiwania: opis (zrodlo + prompt) i lista ocen. */
@@ -248,7 +283,7 @@ export default function App() {
       </header>
 
       {err && <div className="empty error">{err}</div>}
-      {!err && view.length === 0 && <div className="empty">{loading ? "Ładowanie…" : "Wklej link z OLX i kliknij Scrapuj."}</div>}
+      {!err && view.length === 0 && <div className="empty">{loading ? "Ładowanie…" : "Wybierz kategorię i miasto, potem kliknij Scrapuj."}</div>}
 
       <div className="grid">
         {view.map((it, i) => (
