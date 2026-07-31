@@ -1,13 +1,14 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { loadHistoryFile } from "../../../scraper.js";
+import { loadStore } from "../../../scraper.js";
 
 // Oferty per plik w cache Nexta — otwarcie wyszukiwania nie odpytuje Upstasha za kazdym razem.
-// Tag store-<plik> inwalidowany po scrape i rate-all.
+// Tag store-<plik> inwalidowany po scrape. Oceny tu nie siedza (maja wlasna warstwe per
+// wymagania), wiec ocenianie nie ma powodu tego cache'u ruszac.
 async function cachedLoad(file) {
   "use cache";
   cacheLife("hours");
   cacheTag(`store-${file}`);
-  return loadHistoryFile(file);
+  return loadStore(file);
 }
 
 export async function GET(req) {

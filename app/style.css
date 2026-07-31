@@ -104,6 +104,17 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
   margin-top: 12px;
 }
 
+/* pasek komunikatu: cudza analiza (tylko odczyt) albo ocenianie sciete limitem czasu */
+.brief.note { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.brief.note .small { flex: 1; min-width: 240px; }
+
+/* przycisk udajacy odnosnik — akcja, nie nawigacja, wiec nie moze byc <a> */
+.linkish {
+  border: 0; padding: 0; background: none; font: inherit; color: inherit;
+  text-decoration: underline; cursor: pointer; box-shadow: none;
+}
+.linkish:hover { transform: none; box-shadow: none; }
+
 .progress { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .progress .track { flex: 1; height: 10px; background: var(--card); border: 1.5px solid var(--ink-line); border-radius: 99px; overflow: hidden; }
 .progress .bar { height: 100%; background: repeating-linear-gradient(-45deg, var(--brick), var(--brick) 6px, var(--brick-dark) 6px, var(--brick-dark) 12px); transition: width 0.2s; }
@@ -133,6 +144,8 @@ button.primary:hover:not(:disabled) { background: var(--brick-dark); }
 .card a { color: var(--ink); text-decoration: none; font-weight: 600; }
 .card a:hover { color: var(--brick); text-decoration: underline; text-underline-offset: 3px; }
 .price { font-family: var(--font-fraunces), serif; font-size: 24px; font-weight: 900; color: var(--brick); }
+/* poprzednia cena przy obnizce — sygnal, ze sprzedajacy zmiekl */
+.price .was { margin-left: 8px; font-size: 15px; font-weight: 600; color: var(--muted); text-decoration: line-through; }
 .loc { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
 
 .score {

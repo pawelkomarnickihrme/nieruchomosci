@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useEffect } from "react";
 import CATS from "../olx-categories.json"; // drzewo kategorii OLX (nazwa, segment sciezki, dzieci)
-import { histSlug as slug } from "../../slug.js";
 
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat("pl-PL").format(v) + " zł");
 
@@ -25,9 +24,14 @@ function label(u) {
   } catch { return u || ""; }
 }
 
-// Cache ofert w pamieci (plik -> items): powrot do wyszukiwania renderuje sie od razu z cache,
+// Cache ofert w pamieci (plik -> items): powrot do analizy renderuje sie od razu z cache,
 // a swieze dane dociagaja sie w tle — strona nie pustoszeje i nie skacze przy wczytywaniu.
+// Store ofert jest wspolny dla wszystkich, wiec cache miedzy analizami tego samego
+// wyszukiwania jest poprawny.
 const cache = new Map();
+
+// Adres analizy: /a/<id>. Id jest losowe, wiec link dziala jak udostepnienie.
+const idFromPath = () => (location.pathname.match(/^\/a\/([a-z0-9]+)/i) || [])[1] || "";
 
 // Czyta NDJSON z fetch-a i wola onLine dla kazdej sparsowanej linii.
 async function readNdjson(res, onLine) {
@@ -49,7 +53,6 @@ async function readNdjson(res, onLine) {
 
 export default function App() {
   const portal = "olx"; // ponytail: tylko OLX — wroc do selecta, gdy dojdzie drugi portal
-  const [url, setUrl] = useState(""); // URL aktywnego wyszukiwania (z historii lub zbudowany)
   // Budowanie linku z kategorii + miasta zamiast wklejania.
   const [cat, setCat] = useState(DEF_CAT);
   const [sub, setSub] = useState(DEF_SUB);   // -1 = cala kategoria
@@ -61,77 +64,91 @@ export default function App() {
     const parts = [CATS[cat].p, subs[sub]?.p, subs2[sub2]?.p, citySlug(city)].filter(Boolean);
     return "https://www.olx.pl/" + parts.join("/") + "/";
   }, [cat, sub, sub2, city]);
+
+  const [an, setAn] = useState(null);   // otwarta analiza: { id, file, url, requirements, ... }
+  const [mine, setMine] = useState(false); // cudza analiza jest tylko do odczytu
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [req, setReq] = useState("");
   const [ratings, setRatings] = useState({});
-  const [history, setHistory] = useState([]); // historia konta — dociagana w efekcie, SSR jej nie ma
-  const [user, setUser] = useState(null);     // mail zalogowanego albo null; anonim korzysta bez historii
-  const [active, setActive] = useState("");
+  const [history, setHistory] = useState([]); // analizy uzytkownika — dociagane w efekcie
+  const [user, setUser] = useState(null);     // mail zalogowanego albo null
   const [rateAllLoading, setRateAllLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total }
+  const [trunc, setTrunc] = useState(null);       // { done, total, left } po scieciu przez limit czasu
+  const [copied, setCopied] = useState(false);
 
-  // Pokaz oferty + odtworz zapisane oceny i wymagania, wedlug ktorych powstaly (najnowsze).
-  function showItems(arr) {
-    setItems(arr);
-    const seed = {};
-    let last = null;
-    for (const it of arr) if (it.rating) {
-      seed[it.id || it.url] = it.rating;
-      if (it.rating.requirements && (!last || (it.rating.at || 0) > (last.at || 0))) last = it.rating;
-    }
-    setRatings(seed);
-    if (last) setReq(last.requirements);
-  }
+  const refreshHistory = () =>
+    fetch("/api/history").then((r) => r.json()).then((me) => { setUser(me.user); setHistory(me.rows || []); }).catch(() => {});
 
-  // Czysty start: pusty formularz, zadny wpis z historii nie jest aktywny.
+  // Czysty start: pusty formularz, zadna analiza nie jest otwarta.
   function newSearch() {
-    setActive("");
-    setItems([]);
-    setRatings({});
-    setReq("");
-    setErr("");
-    setUrl("");
+    setAn(null); setMine(false); setItems([]); setRatings({}); setReq(""); setErr(""); setTrunc(null);
     window.history.pushState(null, "", "/");
   }
 
-  async function openHist(h) {
-    if (h.url) setUrl(h.url);
-    setActive(h.file);
-    window.history.pushState(null, "", "/" + slug(h)); // kazde zapytanie ma swoj URL
-    setErr("");
-    const hit = cache.get(h.file);
-    if (hit) showItems(hit); // od razu z cache, swieze dane podmienia sie po cichu
+  async function openAnalysis(id, { push = true } = {}) {
+    setErr(""); setTrunc(null); setCopied(false);
+    if (push) window.history.pushState(null, "", "/a/" + id);
+    const d = await fetch(`/api/analysis?id=${encodeURIComponent(id)}`).then((r) => r.json()).catch(() => null);
+    if (!d || d.error) { setErr(d?.error || "Nie udało się wczytać analizy."); return; }
+    setAn(d.analysis);
+    setMine(d.mine);
+    setRatings(d.ratings || {});
+    setReq(d.analysis.requirements || "");
+    const hit = cache.get(d.analysis.file);
+    if (hit) setItems(hit); // od razu z cache, swieze dane podmienia sie po cichu
     try {
-      const r = await fetch(`/api/load?file=${encodeURIComponent(h.file)}`);
-      const fresh = await r.json();
-      cache.set(h.file, fresh);
-      showItems(fresh);
+      const fresh = await fetch(`/api/load?file=${encodeURIComponent(d.analysis.file)}`).then((r) => r.json());
+      if (Array.isArray(fresh)) { cache.set(d.analysis.file, fresh); setItems(fresh); }
     } catch (e) {
       if (!hit) setErr(String(e.message || e));
     }
   }
 
-  async function rateAll() {
-    if (!active) return;
+  // Kopia cudzej analizy na wlasnosc klikajacego — oryginal zostaje nietkniety.
+  async function clone() {
+    if (!an) return;
+    const d = await fetch(`/api/analysis?clone=${encodeURIComponent(an.id)}`, { method: "POST" }).then((r) => r.json());
+    if (d?.id) { await refreshHistory(); openAnalysis(d.id); } else setErr(d?.error || "Nie udało się skopiować.");
+  }
+
+  async function share() {
+    await navigator.clipboard.writeText(location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function rate() {
+    if (!an || !mine || !req.trim()) return;
     setRateAllLoading(true);
     setProgress({ done: 0, total: 0 });
-    setErr("");
+    setErr(""); setTrunc(null);
     try {
+      // Zmiana wymagan = inna warstwa ocen, wiec zapisujemy je w analizie i czyscimy ekran.
+      if (req !== an.requirements) {
+        await fetch(`/api/analysis?id=${encodeURIComponent(an.id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ requirements: req }),
+        });
+        setAn((a) => ({ ...a, requirements: req }));
+        setRatings({});
+      }
       const res = await fetch("/api/rate-all", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ file: active, requirements: req }),
+        body: JSON.stringify({ file: an.file, requirements: req }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Błąd");
       // NDJSON: parsuj linie na biezaco i wyrzucaj oceny na strone.
       await readNdjson(res, (m) => {
         if (m.error) throw new Error(m.error);
+        if (m.finished) { if (m.truncated) setTrunc(m); return; }
         setRatings((r) => ({ ...r, [m.key]: m.rating }));
         setProgress({ done: m.done, total: m.total });
       });
-      cache.delete(active); // oceny zmienily plik na serwerze — nastepne otwarcie dociagnie swieze
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
@@ -140,42 +157,39 @@ export default function App() {
     }
   }
 
-  // Na starcie: kto jest zalogowany + jego historia, potem otworz zapytanie z adresu.
-  // Link spoza historii (albo od anonima) rozwiazuje /api/history?slug= — dane sa w bazie, ale nie ladują do paska.
+  // Na starcie: kto jest zalogowany + jego analizy, potem otworz analize z adresu.
+  // Link do cudzej analizy dziala tak samo — /api/analysis jest publiczne.
   useEffect(() => {
-    (async () => {
-      const me = await fetch("/api/history").then((r) => r.json()).catch(() => ({ user: null, rows: [] }));
-      setUser(me.user);
-      setHistory(me.rows);
-      const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
-      if (!want) return;
-      const hit = me.rows.find((x) => slug(x) === want || x.file === want)
-        || (await fetch(`/api/history?slug=${encodeURIComponent(want)}`).then((r) => r.json()).catch(() => null));
-      if (hit) openHist(hit);
-    })();
+    refreshHistory();
+    const id = idFromPath();
+    if (id) openAnalysis(id, { push: false });
   }, []);
 
   async function run(e) {
     e.preventDefault();
     setLoading(true);
-    setErr("");
+    setErr(""); setTrunc(null);
     try {
       const r = await fetch(`/api/scrape?portal=${portal}&url=${encodeURIComponent(builtUrl)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
-      setUrl(builtUrl);
-      showItems(d.items);
-      const entry = { file: d.file, portal, url: builtUrl, count: d.items.length, title: d.items[0]?.title || d.file, at: Date.now() };
-      cache.set(entry.file, d.items);
-      setActive(entry.file);
-      window.history.pushState(null, "", "/" + slug(entry));
-      // Historia idzie do bazy zawsze — zalogowanym pod mail, gosciom pod id z ciasteczka.
-      const rows = await fetch("/api/history", {
+      const a = await fetch("/api/analysis", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(entry),
+        body: JSON.stringify({
+          file: d.file, portal, url: builtUrl,
+          count: d.items.length, title: d.items[0]?.title || d.file,
+        }),
       }).then((r) => r.json());
-      if (Array.isArray(rows)) setHistory(rows);
+      if (a?.error) throw new Error(a.error);
+      cache.set(d.file, d.items);
+      setItems(d.items);
+      setRatings({});
+      setReq("");
+      setAn(a);
+      setMine(true);
+      window.history.pushState(null, "", "/a/" + a.id);
+      refreshHistory();
     } catch (e) {
       setErr(String(e.message || e));
       setItems([]);
@@ -192,25 +206,20 @@ export default function App() {
 
   return (
     <div className="layout">
-      {!active && <aside>
-        <button type="button" className="hist new" onClick={newSearch} disabled={!active && items.length === 0}>
+      {!an && <aside>
+        <button type="button" className="hist new" onClick={newSearch} disabled={items.length === 0}>
           + Nowe wyszukiwanie
         </button>
-        <h2>Historia</h2>
-        {history.length === 0 && <div className="muted small">Brak wyszukan.</div>}
+        <h2>Moje analizy</h2>
+        {history.length === 0 && <div className="muted small">Brak analiz.</div>}
         {history.map((h) => (
-          <button
-            type="button"
-            key={h.file}
-            className={"hist" + (h.file === active ? " on" : "")}
-            onClick={() => openHist(h)}
-          >
+          <button type="button" key={h.id} className="hist" onClick={() => openAnalysis(h.id)}>
             <span className="tag">{h.portal}</span>
             <span className="ht" title={h.url || h.title}>{h.url ? label(h.url) : h.title}</span>
             <span className="muted small">{h.count}</span>
           </button>
         ))}
-        {/* Gosc ma historie zwiazana z przegladarka; logowanie przypina ja do konta. */}
+        {/* Gosc ma analizy zwiazane z przegladarka; logowanie przypina je do konta. */}
         {user
           ? <a className="muted small acct" href="/api/auth/signout">{user} · wyloguj</a>
           : <a className="muted small acct" href="/api/auth/signin">Gość · zaloguj się przez Google</a>}
@@ -218,7 +227,7 @@ export default function App() {
       <main>
       <header>
         <p className="kicker">Łowca ogłoszeń</p>
-        {!active ? (
+        {!an ? (
           /* Home: tylko formularz nowej analizy. */
           <>
             <h1>Szukaj ofert</h1>
@@ -245,14 +254,23 @@ export default function App() {
             <p className="muted small"><a href={builtUrl} target="_blank" rel="noopener">Podejrzyj to wyszukiwanie na OLX ↗</a></p>
           </>
         ) : (
-          /* Widok wyszukiwania: opis (zrodlo + prompt) i lista ocen. */
+          /* Widok analizy: zrodlo, wymagania i lista ocen. */
           <>
             <button type="button" className="hist new" onClick={newSearch}>← Nowe wyszukiwanie</button>
             <h1>
-              {url ? label(url) : "Oferty"} <span className="muted">· {items.length} ofert</span>
+              {an.url ? label(an.url) : "Oferty"} <span className="muted">· {items.length} ofert</span>
             </h1>
-            {url && <p className="muted small"><a href={url} target="_blank" rel="noopener">Zobacz na OLX ↗</a></p>}
-            {items.length > 0 && (
+            <p className="muted small">
+              {an.url && <><a href={an.url} target="_blank" rel="noopener">Zobacz na OLX ↗</a> · </>}
+              <button type="button" className="linkish" onClick={share}>{copied ? "Skopiowano link ✓" : "Udostępnij"}</button>
+            </p>
+            {!mine && (
+              <div className="brief note">
+                <span className="muted small">To analiza kogoś innego — widzisz ją tylko do odczytu.</span>
+                <button type="button" className="primary" onClick={clone}>Przelicz po swojemu</button>
+              </div>
+            )}
+            {mine && items.length > 0 && (
               <div className="brief">
                 <label htmlFor="req">Czego szukasz?</label>
                 <textarea
@@ -264,8 +282,8 @@ export default function App() {
                 />
                 <div className="brief-foot">
                   <span className="muted small">AI oceni każdą ofertę 1–10 względem wymagań — lista sama ułoży się od najlepszych.</span>
-                  <button type="button" className="primary" onClick={rateAll} disabled={!req.trim() || rateAllLoading}>
-                    {rateAllLoading ? "Oceniam wszystkie…" : `Oceń wszystkie (${items.length})`}
+                  <button type="button" className="primary" onClick={rate} disabled={!req.trim() || rateAllLoading}>
+                    {rateAllLoading ? "Oceniam…" : `Oceń wszystkie (${items.length})`}
                   </button>
                 </div>
               </div>
@@ -280,38 +298,50 @@ export default function App() {
             <span className="small muted">{progress.done}/{progress.total}</span>
           </div>
         )}
+        {/* Limit czasu funkcji sciol ocenianie — mow o tym wprost zamiast gasnac bez slowa. */}
+        {trunc && (
+          <div className="brief note">
+            <span className="small">
+              Oceniono {trunc.done} z {trunc.total} — zabrakło czasu na resztę ({trunc.left}).
+              Oceny są zapisane, kolejne uruchomienie ruszy od miejsca przerwania.
+            </span>
+            <button type="button" className="primary" onClick={rate} disabled={rateAllLoading}>Kontynuuj</button>
+          </div>
+        )}
       </header>
 
       {err && <div className="empty error">{err}</div>}
       {!err && view.length === 0 && <div className="empty">{loading ? "Pobieram oferty…" : "Wybierz kategorię i miasto, potem kliknij „Pobierz oferty”."}</div>}
 
       <div className="grid">
-        {view.map((it, i) => (
-          <div className="card" key={it.id || it.url || i}>
-            {it.photo && (
-              <a href={it.url} target="_blank" rel="noopener" className="thumb">
-                <img src={it.photo.replace(/;s=\d+x\d+/, ";s=600x450")} alt="" loading="lazy" />
-              </a>
-            )}
-            <div className="price">{money(it.price)}</div>
-            <a href={it.url} target="_blank" rel="noopener">{it.title || "(bez tytułu)"}</a>
-            {it.location && <div className="loc">{it.location}</div>}
-            {(() => {
-              const r = ratings[it.id || it.url];
-              return (
-                <>
-                  {r?.score != null && (
-                    <div className="score">
-                      <span className="score-num">{r.score}<small>/10</small></span>
-                      <span>{r.reason}</span>
-                    </div>
-                  )}
-                  {r?.error && <div className="score error">{r.error}</div>}
-                </>
-              );
-            })()}
-          </div>
-        ))}
+        {view.map((it, i) => {
+          const r = ratings[it.id || it.url];
+          return (
+            <div className="card" key={it.id || it.url || i}>
+              {it.photo && (
+                <a href={it.url} target="_blank" rel="noopener" className="thumb">
+                  <img src={it.photo.replace(/;s=\d+x\d+/, ";s=600x450")} alt="" loading="lazy" />
+                </a>
+              )}
+              <div className="price">
+                {money(it.price)}
+                {/* Historia cen: pokaz poprzednia cene, gdy oferta stanicala od pierwszego pobrania. */}
+                {it.prices?.length > 1 && it.prices.at(-2).price > it.price && (
+                  <span className="was">{money(it.prices.at(-2).price)}</span>
+                )}
+              </div>
+              <a href={it.url} target="_blank" rel="noopener">{it.title || "(bez tytułu)"}</a>
+              {it.location && <div className="loc">{it.location}</div>}
+              {r?.score != null && (
+                <div className="score">
+                  <span className="score-num">{r.score}<small>/10</small></span>
+                  <span>{r.reason}</span>
+                </div>
+              )}
+              {r?.error && <div className="score error">{r.error}</div>}
+            </div>
+          );
+        })}
       </div>
       </main>
     </div>
