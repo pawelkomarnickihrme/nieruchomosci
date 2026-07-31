@@ -183,6 +183,17 @@ export async function listHistory() {
   return rows.sort((a, b) => b.at - a.at);
 }
 
+// Historia per tozsamosc (konto Google albo gosc z ciasteczka): jeden JSON obok store'ow ofert.
+const histFile = (id) => `hist-${id.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`;
+
+export const historyOf = (id) => getJson(histFile(id), []);
+
+export async function pushHistory(id, entry) {
+  const rows = [entry, ...(await historyOf(id)).filter((x) => x.file !== entry.file)];
+  await setJson(histFile(id), rows);
+  return rows;
+}
+
 export async function loadHistoryFile(file) {
   if (!/^[a-z0-9._-]+\.json$/i.test(file)) throw new Error("Zla nazwa pliku.");
   return getJson(file, []);

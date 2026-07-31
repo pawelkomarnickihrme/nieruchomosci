@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import CATS from "../olx-categories.json"; // drzewo kategorii OLX (nazwa, segment sciezki, dzieci)
+import { histSlug as slug } from "../../slug.js";
 
 const money = (v) => (v == null ? "—" : new Intl.NumberFormat("pl-PL").format(v) + " zł");
 
@@ -15,23 +16,13 @@ const DEF_CAT = Math.max(0, CATS.findIndex((c) => c.p === "nieruchomosci"));
 const DEF_SUB = Math.max(-1, (CATS[DEF_CAT].c || []).findIndex((c) => c.p === "mieszkania"));
 const DEF_SUB2 = Math.max(-1, (CATS[DEF_CAT].c?.[DEF_SUB]?.c || []).findIndex((c) => c.p === "wynajem"));
 
-// Ladny hash w URL: portal + sciezka wyszukiwania zamiast nazwy pliku (#olx-mieszkania-wynajem-gdansk).
-function slug(h) {
+// Czytelna etykieta wyszukiwania: "Mieszkania › Wynajem › Gdansk" zamiast surowego URL-a.
+function label(u) {
   try {
-    return [h.portal, ...new URL(h.url).pathname.split("/").filter((s) => s && s !== "pl" && s !== "nieruchomosci")]
-      .join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  } catch {
-    return h.file.replace(/\.json$/i, "");
-  }
-}
-
-// Historia per uzytkownik w localStorage — baza trzyma dane, ale liste wyszukan kazdy ma swoja.
-const LS = "nieruchomosci:hist";
-const readLocal = () => { try { return JSON.parse(localStorage.getItem(LS)) || []; } catch { return []; } };
-function saveLocal(entry) {
-  const next = [entry, ...readLocal().filter((x) => x.file !== entry.file)];
-  localStorage.setItem(LS, JSON.stringify(next));
-  return next;
+    return new URL(u).pathname.split("/").filter((s) => s && s !== "pl")
+      .map((p) => p.split("-").map((w) => (w[0] || "").toUpperCase() + w.slice(1)).join(" "))
+      .join(" › ");
+  } catch { return u || ""; }
 }
 
 // Cache ofert w pamieci (plik -> items): powrot do wyszukiwania renderuje sie od razu z cache,
@@ -75,7 +66,8 @@ export default function App() {
   const [err, setErr] = useState("");
   const [req, setReq] = useState("");
   const [ratings, setRatings] = useState({});
-  const [history, setHistory] = useState([]); // localStorage dopiero w efekcie — SSR go nie ma
+  const [history, setHistory] = useState([]); // historia konta — dociagana w efekcie, SSR jej nie ma
+  const [user, setUser] = useState(null);     // mail zalogowanego albo null; anonim korzysta bez historii
   const [active, setActive] = useState("");
   const [rateAllLoading, setRateAllLoading] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total }
@@ -148,17 +140,19 @@ export default function App() {
     }
   }
 
-  // Na starcie: wczytaj lokalna historie i otworz zapytanie z URL-a. Udostepniony link
-  // (spoza historii) rozwiazujemy przez /api/history — dane sa w bazie, ale nie laduje do paska.
+  // Na starcie: kto jest zalogowany + jego historia, potem otworz zapytanie z adresu.
+  // Link spoza historii (albo od anonima) rozwiazuje /api/history?slug= — dane sa w bazie, ale nie ladują do paska.
   useEffect(() => {
-    const local = readLocal();
-    setHistory(local);
-    const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
-    if (!want) return;
-    const find = (h) => h.find((x) => slug(x) === want || x.file === want);
-    const hit = find(local);
-    if (hit) openHist(hit);
-    else fetch("/api/history").then((r) => r.json()).then((h) => { const s = find(h); if (s) openHist(s); }).catch(() => {});
+    (async () => {
+      const me = await fetch("/api/history").then((r) => r.json()).catch(() => ({ user: null, rows: [] }));
+      setUser(me.user);
+      setHistory(me.rows);
+      const want = decodeURIComponent(location.hash.slice(1) || location.pathname.slice(1));
+      if (!want) return;
+      const hit = me.rows.find((x) => slug(x) === want || x.file === want)
+        || (await fetch(`/api/history?slug=${encodeURIComponent(want)}`).then((r) => r.json()).catch(() => null));
+      if (hit) openHist(hit);
+    })();
   }, []);
 
   async function run(e) {
@@ -170,16 +164,18 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Błąd serwera");
       setUrl(builtUrl);
-      showItems(d);
-      // Wpis do lokalnej historii: serwer zna nazwe pliku, bierzemy ja z /api/history.
-      const sh = await fetch("/api/history").then((r) => r.json());
-      const mine = sh.find((x) => x.portal === portal && x.url === builtUrl);
-      if (mine) {
-        cache.set(mine.file, d);
-        setHistory(saveLocal(mine));
-        setActive(mine.file);
-        window.history.pushState(null, "", "/" + slug(mine));
-      }
+      showItems(d.items);
+      const entry = { file: d.file, portal, url: builtUrl, count: d.items.length, title: d.items[0]?.title || d.file, at: Date.now() };
+      cache.set(entry.file, d.items);
+      setActive(entry.file);
+      window.history.pushState(null, "", "/" + slug(entry));
+      // Historia idzie do bazy zawsze — zalogowanym pod mail, gosciom pod id z ciasteczka.
+      const rows = await fetch("/api/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(entry),
+      }).then((r) => r.json());
+      if (Array.isArray(rows)) setHistory(rows);
     } catch (e) {
       setErr(String(e.message || e));
       setItems([]);
@@ -210,10 +206,14 @@ export default function App() {
             onClick={() => openHist(h)}
           >
             <span className="tag">{h.portal}</span>
-            <span className="ht" title={h.url || h.title}>{h.url || h.title}</span>
+            <span className="ht" title={h.url || h.title}>{h.url ? label(h.url) : h.title}</span>
             <span className="muted small">{h.count}</span>
           </button>
         ))}
+        {/* Gosc ma historie zwiazana z przegladarka; logowanie przypina ja do konta. */}
+        {user
+          ? <a className="muted small acct" href="/api/auth/signout">{user} · wyloguj</a>
+          : <a className="muted small acct" href="/api/auth/signin">Gość · zaloguj się przez Google</a>}
       </aside>}
       <main>
       <header>
@@ -221,8 +221,8 @@ export default function App() {
         {!active ? (
           /* Home: tylko formularz nowej analizy. */
           <>
-            <h1>Nowa analiza</h1>
-            <p className="muted small">Wybierz kategorię OLX i miasto — link zbuduje się sam.</p>
+            <h1>Szukaj ofert</h1>
+            <p className="muted small">Wybierz kategorię i miasto — resztą zajmiemy się my.</p>
             <form className="hunt" onSubmit={run}>
               <select value={cat} onChange={(e) => { setCat(+e.target.value); setSub(-1); setSub2(-1); }}>
                 {CATS.map((c, i) => <option key={c.p} value={i}>{c.n}</option>)}
@@ -240,18 +240,18 @@ export default function App() {
                 </select>
               )}
               <input className="url" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Miasto (puste = cała Polska)" />
-              <button type="submit" className="primary" disabled={loading}>{loading ? "Scrapuję…" : "Scrapuj"}</button>
+              <button type="submit" className="primary" disabled={loading}>{loading ? "Pobieram oferty…" : "Pobierz oferty"}</button>
             </form>
-            <p className="muted small"><a href={builtUrl} target="_blank" rel="noopener">{builtUrl}</a></p>
+            <p className="muted small"><a href={builtUrl} target="_blank" rel="noopener">Podejrzyj to wyszukiwanie na OLX ↗</a></p>
           </>
         ) : (
           /* Widok wyszukiwania: opis (zrodlo + prompt) i lista ocen. */
           <>
             <button type="button" className="hist new" onClick={newSearch}>← Nowe wyszukiwanie</button>
             <h1>
-              Nieruchomości <span className="muted">· {items.length} ofert</span>
+              {url ? label(url) : "Oferty"} <span className="muted">· {items.length} ofert</span>
             </h1>
-            {url && <p className="muted small">{url}</p>}
+            {url && <p className="muted small"><a href={url} target="_blank" rel="noopener">Zobacz na OLX ↗</a></p>}
             {items.length > 0 && (
               <div className="brief">
                 <label htmlFor="req">Czego szukasz?</label>
@@ -283,7 +283,7 @@ export default function App() {
       </header>
 
       {err && <div className="empty error">{err}</div>}
-      {!err && view.length === 0 && <div className="empty">{loading ? "Ładowanie…" : "Wybierz kategorię i miasto, potem kliknij Scrapuj."}</div>}
+      {!err && view.length === 0 && <div className="empty">{loading ? "Pobieram oferty…" : "Wybierz kategorię i miasto, potem kliknij „Pobierz oferty”."}</div>}
 
       <div className="grid">
         {view.map((it, i) => (

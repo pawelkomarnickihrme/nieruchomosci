@@ -7,8 +7,9 @@ export async function GET(req) {
   const q = new URL(req.url).searchParams;
   try {
     const items = await scrape(q.get("portal"), q.get("url"));
-    revalidateTag(`store-${storeName(q.get("portal"), q.get("url"))}`, "max"); // swiezy scrape uniewaznia cache /api/load
-    return Response.json(items);
+    const file = storeName(q.get("portal"), q.get("url"));
+    revalidateTag(`store-${file}`, "max"); // swiezy scrape uniewaznia cache /api/load
+    return Response.json({ file, items }); // file odsyla od razu — klient nie musi go szukac w /api/history
   } catch (e) {
     return Response.json({ error: String(e.message || e) }, { status: 502 });
   }
